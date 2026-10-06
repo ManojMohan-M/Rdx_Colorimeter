@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RDX Colorimeter</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Tahoma,sans-serif; background:linear-gradient(135deg,#667eea,#764ba2); min-height:100vh; padding:10px; }
+.app { max-width:500px; margin:0 auto; background:#fff; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,.3); overflow:hidden; display:flex; flex-direction:column; min-height:calc(100vh - 20px); }
+.header { background:linear-gradient(135deg,#667eea,#764ba2); color:#fff; padding:18px 20px; text-align:center; position:relative; }
+.header h1 { font-size:24px; font-weight:700; }
+.header p { font-size:12px; opacity:.9; margin-top:2px; }
+.back { position:absolute; left:12px; top:50%; transform:translateY(-50%); background:rgba(255,255,255,.2); color:#fff; border:none; width:36px; height:36px; border-radius:50%; font-size:20px; cursor:pointer; display:none; }
+.status-bar { display:flex; justify-content:space-between; align-items:center; padding:10px 20px; background:#f5f7fa; border-bottom:1px solid #e0e0e0; font-size:12px; gap:10px; }
+.dot { width:8px; height:8px; border-radius:50%; background:#f44336; display:inline-block; margin-right:6px; }
+.dot.on { background:#4caf50; }
+.batt { display:flex; align-items:center; gap:6px; }
+.batt-icon { width:24px; height:12px; border:1px solid #666; border-radius:2px; padding:1px; position:relative; }
+.batt-icon::after { content:''; position:absolute; right:-4px; top:3px; width:2px; height:4px; background:#666; }
+.batt-fill { height:100%; width:0; background:#4caf50; transition:all .3s; }
+.content { flex:1; padding:20px; overflow-y:auto; }
+.page { display:none; }
+.page.show { display:block; }
+.section-title { font-size:13px; font-weight:600; color:#333; margin:4px 0 10px; text-transform:uppercase; letter-spacing:1px; }
+button.b { padding:14px; border:none; border-radius:10px; font-size:13px; font-weight:600; cursor:pointer; text-transform:uppercase; letter-spacing:.5px; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+button.b:disabled { opacity:.45; cursor:not-allowed; }
+.primary { background:linear-gradient(135deg,#667eea,#764ba2); color:#fff; width:100%; }
+.secondary { background:#f5f7fa; color:#667eea; border:2px solid #667eea !important; }
+.danger { background:#f44336; color:#fff; }
+.success { background:#4caf50; color:#fff; }
+
+/* page 1 */
+.home { text-align:center; padding:60px 10px 20px; }
+.home .logo { font-size:34px; font-weight:800; color:#4a3fa0; letter-spacing:.5px; }
+.home .sub { color:#999; font-size:13px; margin:6px 0 40px; }
+.home input[type=file] { display:none; }
+
+/* page 2 */
+.previews { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+.previews figure { background:#f5f7fa; border-radius:10px; padding:6px; text-align:center; }
+.previews canvas { width:100%; border-radius:6px; display:block; background:#eee; }
+.previews figcaption { font-size:11px; color:#999; margin-top:4px; }
+.crow { display:flex; align-items:center; gap:12px; padding:10px; background:#f5f7fa; border-radius:12px; margin-bottom:10px; border:2px solid transparent; }
+.crow.sel { border-color:#667eea; }
+.crow .sw { width:54px; height:54px; border-radius:10px; border:1px solid #ccc; flex:none; }
+.crow .info { flex:1; min-width:0; font-size:12px; color:#333; }
+.crow .info .nm { font-weight:700; font-size:13px; }
+.crow .info .lab { color:#667eea; font-weight:600; margin:2px 0; }
+.crow .info .pc { color:#999; font-size:11px; }
+.crow button.b { padding:10px 12px; font-size:11px; white-space:nowrap; }
+.actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+.actions .full { grid-column:1/-1; }
+
+/* page 3 */
+label { display:block; font-size:12px; color:#666; margin-bottom:6px; }
+.row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+input[type=number], select { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; margin-bottom:14px; }
+.sample { display:flex; align-items:center; gap:12px; background:#f5f7fa; border-radius:12px; padding:10px; margin:12px 0; }
+.sample .sw { width:54px; height:54px; border-radius:10px; border:1px solid #ccc; background:#808080; flex:none; }
+.res { display:flex; align-items:center; gap:10px; padding:10px; border-radius:10px; background:#f5f7fa; margin-bottom:8px; border-left:5px solid #ccc; font-size:12px; }
+.res.best { border-left-color:#667eea; background:#f0f4ff; }
+.res .sw { width:34px; height:34px; border-radius:8px; border:1px solid #ccc; flex:none; }
+.res .g { flex:1; }
+.res .de { font-size:20px; font-weight:700; color:#667eea; }
+.pass { color:#4caf50; font-weight:700; } .fail { color:#f44336; font-weight:700; }
+.tag { font-size:10px; background:#667eea; color:#fff; border-radius:8px; padding:1px 6px; margin-left:6px; }
+.footer { padding:12px 20px; background:#f5f7fa; border-top:1px solid #e0e0e0; text-align:center; font-size:11px; color:#999; }
+.toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#333; color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none; max-width:90vw; text-align:center; }
+.toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <button class="back" id="backBtn" onclick="goBack()">&#8592;</button>
+    <h1>RDX Colorimeter</h1><p id="hdrSub">Master image color standards</p>
+  </div>
+
+  <div class="status-bar">
+    <div><span class="dot" id="dot"></span><span id="connText">Not connected</span></div>
+    <button class="b secondary" id="connBtn" style="padding:6px 12px;font-size:11px" onclick="toggleConnect()">Connect</button>
+    <div class="batt"><span id="battPct">--</span>%<div class="batt-icon"><div class="batt-fill" id="battFill"></div></div></div>
+  </div>
+
+  <div class="content">
+
+    <!-- PAGE 1: upload -->
+    <div class="page show" id="pageHome">
+      <div class="home">
+        <div class="logo">RDX Colorimeter</div>
+        <div class="sub">Upload a master image to split it into colors</div>
+        <button class="b primary" onclick="$('file').click()">Upload master image</button>
+        <input type="file" id="file" accept="image/*" onchange="onFile(this)">
+      </div>
+    </div>
+
+    <!-- PAGE 2: split colors + set standard -->
+    <div class="page" id="pageColors">
+      <div class="previews">
+        <figure><canvas id="cvMaster"></canvas><figcaption>Master image</figcaption></figure>
+        <figure><canvas id="cvSeg"></canvas><figcaption>Split colors</figcaption></figure>
+      </div>
+      <div class="section-title"><span id="colCount">0</span> colors found</div>
+      <div id="colorList"></div>
+      <div class="actions">
+        <button class="b secondary" onclick="setAllStandards()">Set Standard (all)</button>
+        <button class="b primary" id="toCmpBtn" onclick="openCompare()" disabled>Color Compare</button>
+        <button class="b danger full" onclick="newMaster()">New master image</button>
+      </div>
+    </div>
+
+    <!-- PAGE 3: color compare -->
+    <div class="page" id="pageCompare">
+      <div class="row2">
+        <div><label>&#916;E Threshold</label><input type="number" id="thr" min="0.1" max="50" step="0.1" value="2.0"></div>
+        <div><label>&#916;E Method</label>
+          <select id="fml"><option value="ab">&#916;E*ab</option><option value="94">&#916;E*94</option><option value="00">&#916;E*00</option></select></div>
+      </div>
+      <button class="b primary" id="scanBtn" onclick="scanAndCompare()">Scan Sample &amp; Compare</button>
+      <div class="sample">
+        <div class="sw" id="smpSw"></div>
+        <div><div style="font-size:11px;color:#999;text-transform:uppercase">Sample</div>
+          <div style="font-weight:700;color:#667eea" id="smpLab">L -- &nbsp; a -- &nbsp; b --</div></div>
+      </div>
+      <div class="section-title">Results</div>
+      <div id="results"><div style="text-align:center;color:#999;font-size:12px;padding:16px">Scan a sample to compare with the standards</div></div>
+      <div class="actions"><button class="b secondary full" onclick="calibrate()">Calibrate (cap on!)</button></div>
+    </div>
+
+  </div>
+  <div class="footer" id="footer">Firmware: -- | Bluetooth LE</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const RXC = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const TXC = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const $ = id => document.getElementById(id);
+const dec = new TextDecoder(), enc = new TextEncoder();
+
+// Master-image session state. Lives in memory only, so the standards stay
+// until the process is over (New master image) or the page is closed.
+let colors = [];          // [{id, L,a,b, rgb:[r,g,b], pct, std:bool}]
+let segW = 0, segH = 0, segMap = null;   // per-pixel color index
+let selected = -1;
+let page = 'Home', sample = null;
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2500); }
+
+// ── Navigation ────────────────────────────────────────────────────
+function show(p) {
+  page = p;
+  ['Home', 'Colors', 'Compare'].forEach(n => $('page' + n).classList.toggle('show', n === p));
+  $('backBtn').style.display = p === 'Home' ? 'none' : 'block';
+  $('hdrSub').textContent = { Home: 'Master image color standards', Colors: 'Set standards for each color', Compare: 'Color compare' }[p];
+  window.scrollTo(0, 0);
+}
+function goBack() { show(page === 'Compare' ? 'Colors' : 'Home'); }
+function newMaster() {
+  if (colors.some(c => c.std) && !confirm('Standards will be cleared. Start over?')) return;
+  colors = []; segMap = null; selected = -1; sample = null; $('file').value = '';
+  $('results').innerHTML = '<div style="text-align:center;color:#999;font-size:12px;padding:16px">Scan a sample to compare with the standards</div>';
+  $('smpSw').style.background = '#808080'; $('smpLab').innerHTML = 'L -- &nbsp; a -- &nbsp; b --';
+  show('Home');
+}
+
+// ── Color math (sRGB D65, same as the device) ─────────────────────
+function rgbToLab(r, g, b) {
+  const lin = v => { v /= 255; return v > 0.04045 ? Math.pow((v + 0.055) / 1.055, 2.4) : v / 12.92; };
+  const R = lin(r), G = lin(g), B = lin(b);
+  const X = (0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047;
+  const Y = 0.2126729 * R + 0.7151522 * G + 0.0721750 * B;
+  const Z = (0.0193339 * R + 0.1191920 * G + 0.9503041 * B) / 1.08883;
+  const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+  return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+}
+function labToRgb(L, a, b) {
+  const fy = (L + 16) / 116, fx = a / 500 + fy, fz = fy - b / 200;
+  const f2 = t => t * t * t > 0.008856 ? t * t * t : (t - 16 / 116) / 7.787;
+  const X = 0.95047 * f2(fx), Y = f2(fy), Z = 1.08883 * f2(fz);
+  const r = 3.2406 * X - 1.5372 * Y - 0.4986 * Z, g = -0.9689 * X + 1.8758 * Y + 0.0415 * Z, bl = 0.0557 * X - 0.2040 * Y + 1.0570 * Z;
+  const gc = v => { v = Math.min(1, Math.max(0, v)); return Math.round(255 * (v > 0.0031308 ? 1.055 * Math.pow(v, 1 / 2.4) - 0.055 : 12.92 * v)); };
+  return [gc(r), gc(g), gc(bl)];
+}
+function dE(m, s, c1, c2) {
+  const dL = c2[0] - c1[0], dA = c2[1] - c1[1], dB = c2[2] - c1[2];
+  if (m === 'ab') return Math.hypot(dL, dA, dB);
+  const C1 = Math.hypot(c1[1], c1[2]), C2 = Math.hypot(c2[1], c2[2]), dC = C2 - C1;
+  if (m === '94') {
+    const dH2 = Math.max(0, dA * dA + dB * dB - dC * dC), sC = 1 + 0.045 * C1, sH = 1 + 0.015 * C1;
+    return Math.sqrt(dL * dL + (dC / sC) ** 2 + dH2 / (sH * sH));
+  }
+  // CIEDE2000
+  const rad = Math.PI / 180, deg = 180 / Math.PI, Cb = (C1 + C2) / 2;
+  const G = 0.5 * (1 - Math.sqrt(Cb ** 7 / (Cb ** 7 + 25 ** 7)));
+  const a1 = (1 + G) * c1[1], a2 = (1 + G) * c2[1];
+  const Cp1 = Math.hypot(a1, c1[2]), Cp2 = Math.hypot(a2, c2[2]);
+  const hp = (b, a) => (b === 0 && a === 0) ? 0 : (Math.atan2(b, a) * deg + 360) % 360;
+  const h1 = hp(c1[2], a1), h2 = hp(c2[2], a2);
+  const dLp = c2[0] - c1[0], dCp = Cp2 - Cp1;
+  let dh = 0;
+  if (Cp1 * Cp2 !== 0) { dh = h2 - h1; if (dh > 180) dh -= 360; else if (dh < -180) dh += 360; }
+  const dH = 2 * Math.sqrt(Cp1 * Cp2) * Math.sin(dh * rad / 2);
+  const Lb = (c1[0] + c2[0]) / 2, Cpb = (Cp1 + Cp2) / 2;
+  let hb = h1 + h2;
+  if (Cp1 * Cp2 === 0) hb = h1 + h2;
+  else if (Math.abs(h1 - h2) <= 180) hb = (h1 + h2) / 2;
+  else hb = (h1 + h2 < 360) ? (h1 + h2 + 360) / 2 : (h1 + h2 - 360) / 2;
+  const T = 1 - 0.17 * Math.cos((hb - 30) * rad) + 0.24 * Math.cos(2 * hb * rad) + 0.32 * Math.cos((3 * hb + 6) * rad) - 0.20 * Math.cos((4 * hb - 63) * rad);
+  const dTh = 30 * Math.exp(-(((hb - 275) / 25) ** 2));
+  const Rc = 2 * Math.sqrt(Cpb ** 7 / (Cpb ** 7 + 25 ** 7));
+  const Sl = 1 + 0.015 * (Lb - 50) ** 2 / Math.sqrt(20 + (Lb - 50) ** 2), Sc = 1 + 0.045 * Cpb, Sh = 1 + 0.015 * Cpb * T;
+  const Rt = -Math.sin(2 * dTh * rad) * Rc;
+  return Math.sqrt((dLp / Sl) ** 2 + (dCp / Sc) ** 2 + (dH / Sh) ** 2 + Rt * (dCp / Sc) * (dH / Sh));
+}
+
+// ── Master image -> split colors ──────────────────────────────────
+function onFile(inp) {
+  const f = inp.files && inp.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { try { splitImage(img); } catch (e) { toast('Could not read image'); } URL.revokeObjectURL(img.src); };
+  img.onerror = () => toast('Not a valid image');
+  img.src = URL.createObjectURL(f);
+}
+
+// Pipeline: downscale -> Lab -> farthest-point seeding -> k-means ->
+// merge near-identical clusters -> drop tiny ones -> sort by area.
+function splitImage(img) {
+  const MAXD = 128, sc = Math.min(1, MAXD / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * sc)), h = Math.max(1, Math.round(img.height * sc));
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h); cx.drawImage(img, 0, 0, w, h);
+  const px = cx.getImageData(0, 0, w, h).data, n = w * h;
+
+  const lab = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { const l = rgbToLab(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]); lab[i * 3] = l[0]; lab[i * 3 + 1] = l[1]; lab[i * 3 + 2] = l[2]; }
+  const d2 = (i, c) => { const a = lab[i * 3] - c[0], b = lab[i * 3 + 1] - c[1], d = lab[i * 3 + 2] - c[2]; return a * a + b * b + d * d; };
+
+  const KMAX = 12, SEED_MIN = 8, MERGE = 8, MIN_AREA = 0.005;
+  // seeding: start at the pixel nearest the mean, then keep adding the pixel
+  // farthest from every centroid until nothing is farther than SEED_MIN
+  let mean = [0, 0, 0];
+  for (let i = 0; i < n; i++) { mean[0] += lab[i * 3]; mean[1] += lab[i * 3 + 1]; mean[2] += lab[i * 3 + 2]; }
+  mean = mean.map(v => v / n);
+  let first = 0, fd = 1e18;
+  for (let i = 0; i < n; i++) { const d = d2(i, mean); if (d < fd) { fd = d; first = i; } }
+  let cen = [[lab[first * 3], lab[first * 3 + 1], lab[first * 3 + 2]]];
+  const minD = new Float32Array(n).fill(1e18);
+  while (cen.length < KMAX) {
+    const last = cen[cen.length - 1]; let far = -1, fv = 0;
+    for (let i = 0; i < n; i++) { const d = d2(i, last); if (d < minD[i]) minD[i] = d; if (minD[i] > fv) { fv = minD[i]; far = i; } }
+    if (fv < SEED_MIN * SEED_MIN) break;
+    cen.push([lab[far * 3], lab[far * 3 + 1], lab[far * 3 + 2]]);
+  }
+
+  const assign = new Int16Array(n);
+  const run = iters => {
+    for (let it = 0; it < iters; it++) {
+      const sum = cen.map(() => [0, 0, 0, 0]);
+      for (let i = 0; i < n; i++) {
+        let best = 0, bd = 1e18;
+        for (let k = 0; k < cen.length; k++) { const d = d2(i, cen[k]); if (d < bd) { bd = d; best = k; } }
+        assign[i] = best; const s = sum[best]; s[0] += lab[i * 3]; s[1] += lab[i * 3 + 1]; s[2] += lab[i * 3 + 2]; s[3]++;
+      }
+      cen = cen.map((c, k) => sum[k][3] ? [sum[k][0] / sum[k][3], sum[k][1] / sum[k][3], sum[k][2] / sum[k][3]] : c);
+    }
+  };
+  run(8);
+  const counts = () => { const c = new Array(cen.length).fill(0); for (let i = 0; i < n; i++) c[assign[i]]++; return c; };
+
+  // merge centroids that are visually the same color (weighted by area)
+  for (let merged = true; merged && cen.length > 1;) {
+    merged = false; const cnt = counts();
+    outer: for (let a = 0; a < cen.length; a++) for (let b = a + 1; b < cen.length; b++) {
+      if (Math.hypot(cen[a][0] - cen[b][0], cen[a][1] - cen[b][1], cen[a][2] - cen[b][2]) < MERGE) {
+        const wa = cnt[a] || 1, wb = cnt[b] || 1;
+        cen[a] = [0, 1, 2].map(j => (cen[a][j] * wa + cen[b][j] * wb) / (wa + wb));
+        cen.splice(b, 1); run(2); merged = true; break outer;
+      }
+    }
+  }
+  // drop colors covering almost nothing (anti-aliasing, noise)
+  for (let dropped = true; dropped && cen.length > 1;) {
+    dropped = false; const cnt = counts();
+    let k = cnt.indexOf(Math.min(...cnt));
+    if (cnt[k] / n < MIN_AREA) { cen.splice(k, 1); run(2); dropped = true; }
+  }
+
+  const cnt = counts();
+  const order = cen.map((_, i) => i).sort((a, b) => cnt[b] - cnt[a]);
+  const remap = new Int16Array(cen.length); order.forEach((old, ni) => remap[old] = ni);
+  segMap = new Int16Array(n); for (let i = 0; i < n; i++) segMap[i] = remap[assign[i]];
+  segW = w; segH = h;
+  colors = order.map((old, ni) => ({
+    id: ni + 1, L: cen[old][0], a: cen[old][1], b: cen[old][2],
+    rgb: labToRgb(cen[old][0], cen[old][1], cen[old][2]), pct: cnt[old] / n * 100, std: false
+  }));
+  selected = -1;
+  $('cvMaster').width = w; $('cvMaster').height = h; $('cvMaster').getContext('2d').drawImage(cv, 0, 0);
+  renderColors(); drawSeg(); show('Colors');
+}
+
+function drawSeg() {
+  const cv = $('cvSeg'); cv.width = segW; cv.height = segH;
+  const cx = cv.getContext('2d'), out = cx.createImageData(segW, segH);
+  for (let i = 0; i < segW * segH; i++) {
+    const c = colors[segMap[i]], dim = selected >= 0 && segMap[i] !== selected;
+    out.data[i * 4] = dim ? 235 : c.rgb[0]; out.data[i * 4 + 1] = dim ? 235 : c.rgb[1]; out.data[i * 4 + 2] = dim ? 235 : c.rgb[2]; out.data[i * 4 + 3] = 255;
+  }
+  cx.putImageData(out, 0, 0);
+}
+
+// ── Page 2: color list ────────────────────────────────────────────
+function renderColors() {
+  $('colCount').textContent = colors.length;
+  $('colorList').innerHTML = colors.map((c, i) =>
+    `<div class="crow${i === selected ? ' sel' : ''}" onclick="pick(${i})">
+       <div class="sw" style="background:rgb(${c.rgb})"></div>
+       <div class="info"><div class="nm">Color ${c.id}</div>
+         <div class="lab">L ${c.L.toFixed(1)} &nbsp; a ${c.a.toFixed(1)} &nbsp; b ${c.b.toFixed(1)}</div>
+         <div class="pc">${c.pct.toFixed(1)}% of image${c.std ? ' &middot; <span class="pass">Standard set</span>' : ''}</div></div>
+       <button class="b ${c.std ? 'success' : 'secondary'}" onclick="event.stopPropagation();setStandard(${i})">${c.std ? 'Set &#10003;' : 'Set standard'}</button>
+     </div>`).join('');
+  $('toCmpBtn').disabled = !colors.some(c => c.std);
+}
+function pick(i) { selected = selected === i ? -1 : i; renderColors(); drawSeg(); }
+
+function setStandard(i) {
+  colors[i].std = true; renderColors();
+  // mirror it to the device so its own screen shows the same standard
+  if (dev && dev.gatt.connected) run(null, () => send(`SETSTD ${colors[i].L.toFixed(2)} ${colors[i].a.toFixed(2)} ${colors[i].b.toFixed(2)}`));
+  toast(`Color ${colors[i].id} set as standard`);
+}
+function setAllStandards() { colors.forEach(c => c.std = true); renderColors(); toast('Standard set for all colors'); }
+
+// ── Page 3: compare ───────────────────────────────────────────────
+function openCompare() { if (colors.some(c => c.std)) show('Compare'); }
+
+function scanAndCompare() {
+  if (!dev || !dev.gatt.connected) { toast('Connect to the colorimeter first'); return; }
+  run($('scanBtn'), async () => {
+    $('scanBtn').textContent = 'Scanning...';
+    try { sample = await send('SCAN', 15000); } finally { $('scanBtn').textContent = 'Scan Sample & Compare'; }
+    $('smpSw').style.background = `rgb(${sample.R},${sample.G},${sample.B})`;
+    $('smpLab').innerHTML = `L ${sample.L.toFixed(1)} &nbsp; a ${sample.a.toFixed(1)} &nbsp; b ${sample.b.toFixed(1)}`;
+    renderResults();
+  });
+}
+
+function renderResults() {
+  if (!sample) return;
+  const thr = Math.min(50, Math.max(0.1, parseFloat($('thr').value) || 2.0)); $('thr').value = thr;
+  const m = $('fml').value, s = [sample.L, sample.a, sample.b];
+  const rows = colors.filter(c => c.std).map(c => ({ c, de: dE(m, null, [c.L, c.a, c.b], s) })).sort((x, y) => x.de - y.de);
+  $('results').innerHTML = rows.map((r, i) =>
+    `<div class="res${i === 0 ? ' best' : ''}"><div class="sw" style="background:rgb(${r.c.rgb})"></div>
+       <div class="g"><b>Color ${r.c.id}</b>${i === 0 ? '<span class="tag">closest</span>' : ''}<br>
+         <span style="color:#999">L ${r.c.L.toFixed(1)} a ${r.c.a.toFixed(1)} b ${r.c.b.toFixed(1)}</span></div>
+       <div style="text-align:right"><div class="de">${r.de.toFixed(2)}</div><div class="${r.de <= thr ? 'pass' : 'fail'}">${r.de <= thr ? 'PASS' : 'FAIL'}</div></div></div>`).join('');
+}
+$('thr').addEventListener('change', renderResults);
+$('fml').addEventListener('change', renderResults);
+
+function calibrate() {
+  if (!dev || !dev.gatt.connected) { toast('Connect to the colorimeter first'); return; }
+  if (!confirm('Put the bottom cap on the device, then press OK to calibrate.')) return;
+  run(null, async () => { toast('Calibrating...'); await send('CAL', 15000); toast('Calibration OK'); refreshStatus(); });
+}
+
+// ── Bluetooth link ────────────────────────────────────────────────
+let dev = null, rx = null, tx = null, rxBuf = '', waiter = null, queue = Promise.resolve(), pollTimer = null;
+
+async function toggleConnect() {
+  if (dev && dev.gatt.connected) { dev.gatt.disconnect(); return; }
+  if (!navigator.bluetooth) { toast('Web Bluetooth not supported. Use Chrome on Android/desktop.'); return; }
+  try {
+    $('connBtn').disabled = true; $('connText').textContent = 'Connecting...';
+    dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'RDX' }], optionalServices: [NUS] });
+    dev.addEventListener('gattserverdisconnected', onDisconnected);
+    const srv = await dev.gatt.connect();
+    const svc = await srv.getPrimaryService(NUS);
+    rx = await svc.getCharacteristic(RXC);
+    tx = await svc.getCharacteristic(TXC);
+    tx.addEventListener('characteristicvaluechanged', onData);
+    await tx.startNotifications();
+    setConnected(true);
+    await refreshStatus();
+    pollTimer = setInterval(refreshStatus, 10000);
+  } catch (e) {
+    setConnected(false);
+    if (e.name !== 'NotFoundError') toast('Connect failed: ' + e.message);
+  } finally { $('connBtn').disabled = false; }
+}
+function onDisconnected() { clearInterval(pollTimer); setConnected(false); toast('Device disconnected'); }
+function setConnected(on) {
+  $('dot').classList.toggle('on', on);
+  $('connText').textContent = on ? (dev.name || 'Connected') : 'Not connected';
+  $('connBtn').textContent = on ? 'Disconnect' : 'Connect';
+  if (!on) { $('battPct').textContent = '--'; $('battFill').style.width = '0'; }
+}
+function onData(e) {
+  rxBuf += dec.decode(e.target.value);
+  let i;
+  while ((i = rxBuf.indexOf('\n')) >= 0) {
+    const line = rxBuf.slice(0, i).trim(); rxBuf = rxBuf.slice(i + 1);
+    if (line && waiter) { const w = waiter; waiter = null; try { w.res(JSON.parse(line)); } catch (err) { w.rej(err); } }
+  }
+}
+// One command at a time; resolves with the parsed JSON reply.
+function send(cmd, timeout = 8000) {
+  const job = queue.then(async () => {
+    if (!dev || !dev.gatt.connected) throw new Error('Not connected');
+    const reply = new Promise((res, rej) => {
+      waiter = { res, rej };
+      setTimeout(() => { if (waiter && waiter.res === res) { waiter = null; rej(new Error('Timeout')); } }, timeout);
+    });
+    const data = enc.encode(cmd + '\n');
+    for (let o = 0; o < data.length; o += 20) await rx.writeValue(data.slice(o, o + 20));
+    const r = await reply;
+    if (!r.ok) throw new Error(r.err || 'Device error');
+    return r;
+  });
+  queue = job.catch(() => {});
+  return job;
+}
+async function run(btn, fn) {
+  if (btn) btn.disabled = true;
+  try { return await fn(); } catch (e) { toast(e.message); } finally { if (btn) btn.disabled = false; }
+}
+async function refreshStatus() {
+  try {
+    const s = await send('STATUS');
+    $('battPct').textContent = s.battery;
+    const f = $('battFill'); f.style.width = s.battery + '%';
+    f.style.background = s.battery > 50 ? '#4caf50' : s.battery > 20 ? '#ff9800' : '#f44336';
+    $('footer').textContent = 'Firmware: ' + s.fw + ' | Sensor: ' + (s.sensor ? 'OK' : 'NOT FOUND') + ' | Calibrated: ' + (s.cal ? 'Yes' : 'No');
+  } catch (e) { /* ignore poll errors */ }
+}
+</script>
+</body>
+</html>
