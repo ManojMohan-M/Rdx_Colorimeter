@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RDX Colorimeter - Bluetooth</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Segoe UI',Tahoma,sans-serif; background:linear-gradient(135deg,#667eea,#764ba2); min-height:100vh; padding:10px; }
+.app { max-width:500px; margin:0 auto; background:#fff; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,.3); overflow:hidden; display:flex; flex-direction:column; min-height:calc(100vh - 20px); }
+.header { background:linear-gradient(135deg,#667eea,#764ba2); color:#fff; padding:20px; text-align:center; }
+.header h1 { font-size:26px; font-weight:700; margin-bottom:4px; }
+.header p { font-size:12px; opacity:.9; }
+.status-bar { display:flex; justify-content:space-between; align-items:center; padding:10px 20px; background:#f5f7fa; border-bottom:1px solid #e0e0e0; font-size:12px; gap:10px; }
+.dot { width:8px; height:8px; border-radius:50%; background:#f44336; display:inline-block; margin-right:6px; }
+.dot.on { background:#4caf50; }
+.batt { display:flex; align-items:center; gap:6px; }
+.batt-icon { width:24px; height:12px; border:1px solid #666; border-radius:2px; padding:1px; position:relative; }
+.batt-icon::after { content:''; position:absolute; right:-4px; top:3px; width:2px; height:4px; background:#666; }
+.batt-fill { height:100%; width:0; background:#4caf50; transition:all .3s; }
+.content { flex:1; padding:20px; overflow-y:auto; }
+.section { margin-bottom:22px; }
+.section-title { font-size:13px; font-weight:600; color:#333; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px; }
+.swatch { width:100%; height:110px; border-radius:10px; background:#808080; box-shadow:inset 0 2px 8px rgba(0,0,0,.15); margin-bottom:12px; }
+.grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+.val { background:#f5f7fa; padding:12px 6px; border-radius:10px; text-align:center; border:2px solid #e0e0e0; }
+.val .l { font-size:11px; color:#999; font-weight:600; margin-bottom:6px; }
+.val .n { font-size:24px; font-weight:700; color:#667eea; }
+.btns { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
+button.b { padding:14px; border:none; border-radius:10px; font-size:13px; font-weight:600; cursor:pointer; text-transform:uppercase; letter-spacing:.5px; box-shadow:0 4px 12px rgba(0,0,0,.15); }
+button.b:disabled { opacity:.5; cursor:not-allowed; }
+.primary { background:linear-gradient(135deg,#667eea,#764ba2); color:#fff; grid-column:1/-1; }
+.secondary { background:#f5f7fa; color:#667eea; border:2px solid #667eea !important; }
+.danger { background:#f44336; color:#fff; }
+.tabs { display:flex; background:#f5f7fa; border-radius:10px; padding:5px; margin-bottom:15px; }
+.tab { flex:1; padding:10px; text-align:center; font-size:12px; font-weight:600; border:none; border-radius:8px; background:transparent; color:#999; cursor:pointer; }
+.tab.active { background:#fff; color:#667eea; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+.card { background:#f5f7fa; padding:12px; border-radius:10px; margin-bottom:12px; }
+.de { text-align:center; border:2px solid #e0e0e0; }
+.de .v { font-size:36px; font-weight:700; color:#667eea; margin:8px 0; }
+.pass { color:#4caf50; font-weight:700; } .fail { color:#f44336; font-weight:700; }
+.hist { max-height:220px; overflow-y:auto; }
+.hi { padding:10px; background:#f5f7fa; border-radius:8px; margin-bottom:8px; font-size:12px; border-left:4px solid #667eea; display:flex; gap:10px; align-items:center; }
+.hi .t { color:#999; font-size:11px; } .hi .sw { width:18px; height:18px; border-radius:4px; border:1px solid #ccc; flex:none; }
+label { display:block; font-size:12px; color:#666; margin-bottom:6px; }
+input, select { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; font-size:14px; margin-bottom:14px; }
+.footer { padding:12px 20px; background:#f5f7fa; border-top:1px solid #e0e0e0; text-align:center; font-size:11px; color:#999; }
+.toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#333; color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none; max-width:90vw; text-align:center; }
+.toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header"><h1>RDX Colorimeter</h1><p>Bluetooth Mobile Control</p></div>
+
+  <div class="status-bar">
+    <div><span class="dot" id="dot"></span><span id="connText">Not connected</span></div>
+    <button class="b secondary" id="connBtn" style="padding:6px 12px;font-size:11px" onclick="toggleConnect()">Connect</button>
+    <div class="batt"><span id="battPct">--</span>%<div class="batt-icon"><div class="batt-fill" id="battFill"></div></div></div>
+  </div>
+
+  <div class="content">
+    <div class="section">
+      <div class="section-title">Current Measurement</div>
+      <div class="swatch" id="swatch"></div>
+      <div class="grid3">
+        <div class="val"><div class="l" id="lbl1">L*</div><div class="n" id="v1">--</div></div>
+        <div class="val"><div class="l" id="lbl2">a*</div><div class="n" id="v2">--</div></div>
+        <div class="val"><div class="l" id="lbl3">b*</div><div class="n" id="v3">--</div></div>
+      </div>
+      <div class="btns"><button class="b primary" id="scanBtn" onclick="scanColor()">Scan Color</button></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('compare',this)">Compare</button>
+      <button class="tab" onclick="switchTab('history',this)">History</button>
+      <button class="tab" onclick="switchTab('settings',this)">Settings</button>
+    </div>
+
+    <div id="compareTab" class="section">
+      <div class="section-title">Color Comparison</div>
+      <div class="btns">
+        <button class="b secondary" onclick="loadStandard()">Load Standard</button>
+        <button class="b secondary" onclick="setAsStandard()">Set as Standard</button>
+      </div>
+      <div class="card" id="stdBox" style="display:none">
+        <div style="font-size:11px;color:#999;text-transform:uppercase;margin-bottom:6px">Standard Reference</div>
+        <div style="font-size:14px;font-weight:600">L: <span id="stdL">--</span> &nbsp; a: <span id="stdA">--</span> &nbsp; b: <span id="stdB">--</span></div>
+      </div>
+      <div class="btns"><button class="b primary" id="cmpBtn" onclick="compareNow()">Compare Now</button></div>
+      <div class="card de" id="deBox" style="display:none">
+        <div style="font-size:12px;color:#999;text-transform:uppercase">&#916;E (Color Difference)</div>
+        <div class="v" id="deVal">--</div>
+        <div id="deStat">--</div>
+      </div>
+    </div>
+
+    <div id="historyTab" class="section" style="display:none">
+      <div class="section-title">Measurement History</div>
+      <div id="histList" class="hist"></div>
+      <div class="btns" style="margin-top:10px"><button class="b danger" style="grid-column:1/-1" onclick="clearHistory()">Clear History</button></div>
+    </div>
+
+    <div id="settingsTab" class="section" style="display:none">
+      <div class="section-title">Device Settings</div>
+      <label>&#916;E Threshold (0.1 - 50)</label>
+      <input type="number" id="thr" min="0.1" max="50" step="0.1" value="2.0">
+      <label>&#916;E Method</label>
+      <select id="fml">
+        <option value="0">&#916;E*ab</option>
+        <option value="2">&#916;E*94</option>
+        <option value="6">&#916;E*00</option>
+      </select>
+      <label>Display Color Space (this phone only)</label>
+      <select id="space" onchange="localStorage.setItem('space',this.value);updateDisplay()">
+        <option value="LAB">CIE Lab</option>
+        <option value="LCH">CIE LCh</option>
+        <option value="RGB">RGB</option>
+        <option value="CMYK">CMYK (shows C M Y)</option>
+      </select>
+      <div class="btns">
+        <button class="b primary" onclick="saveSettings()">Save Settings</button>
+        <button class="b secondary" style="grid-column:1/-1" onclick="calibrate()">Calibrate (cap on!)</button>
+        <button class="b danger" style="grid-column:1/-1" onclick="resetDevice()">Reset Device</button>
+      </div>
+    </div>
+  </div>
+  <div class="footer" id="footer">Firmware: -- | Bluetooth LE</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const RXC = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const TXC = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const $ = id => document.getElementById(id);
+
+let dev = null, rx = null, tx = null, rxBuf = '', waiter = null, queue = Promise.resolve();
+let cur = null, std = null, history = [], pollTimer = null;
+const dec = new TextDecoder(), enc = new TextEncoder();
+
+try { history = JSON.parse(localStorage.getItem('hist') || '[]'); } catch (e) {}
+try { const s = localStorage.getItem('space'); if (s) $('space').value = s; } catch (e) {}
+renderHistory();
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2500); }
+
+// ── Bluetooth link ────────────────────────────────────────────────
+async function toggleConnect() {
+  if (dev && dev.gatt.connected) { dev.gatt.disconnect(); return; }
+  if (!navigator.bluetooth) { toast('Web Bluetooth not supported. Use Chrome on Android/desktop.'); return; }
+  try {
+    $('connBtn').disabled = true; $('connText').textContent = 'Connecting...';
+    dev = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'RDX' }], optionalServices: [NUS] });
+    dev.addEventListener('gattserverdisconnected', onDisconnected);
+    const srv = await dev.gatt.connect();
+    const svc = await srv.getPrimaryService(NUS);
+    rx = await svc.getCharacteristic(RXC);
+    tx = await svc.getCharacteristic(TXC);
+    tx.addEventListener('characteristicvaluechanged', onData);
+    await tx.startNotifications();
+    setConnected(true);
+    await refreshStatus(true);
+    pollTimer = setInterval(() => refreshStatus(false), 10000);
+  } catch (e) {
+    setConnected(false);
+    if (e.name !== 'NotFoundError') toast('Connect failed: ' + e.message);
+  } finally { $('connBtn').disabled = false; }
+}
+
+function onDisconnected() { clearInterval(pollTimer); setConnected(false); toast('Device disconnected'); }
+
+function setConnected(on) {
+  $('dot').classList.toggle('on', on);
+  $('connText').textContent = on ? (dev.name || 'Connected') : 'Not connected';
+  $('connBtn').textContent = on ? 'Disconnect' : 'Connect';
+  if (!on) { $('battPct').textContent = '--'; $('battFill').style.width = '0'; }
+}
+
+function onData(e) {
+  rxBuf += dec.decode(e.target.value);
+  let i;
+  while ((i = rxBuf.indexOf('\n')) >= 0) {
+    const line = rxBuf.slice(0, i).trim(); rxBuf = rxBuf.slice(i + 1);
+    if (line && waiter) { const w = waiter; waiter = null; try { w.res(JSON.parse(line)); } catch (err) { w.rej(err); } }
+  }
+}
+
+// One command at a time; resolves with the parsed JSON reply.
+function send(cmd, timeout = 8000) {
+  const job = queue.then(async () => {
+    if (!dev || !dev.gatt.connected) throw new Error('Not connected');
+    const reply = new Promise((res, rej) => {
+      waiter = { res, rej };
+      setTimeout(() => { if (waiter && waiter.res === res) { waiter = null; rej(new Error('Timeout')); } }, timeout);
+    });
+    const data = enc.encode(cmd + '\n');
+    for (let o = 0; o < data.length; o += 20) await rx.writeValue(data.slice(o, o + 20));
+    const r = await reply;
+    if (!r.ok) throw new Error(r.err || 'Device error');
+    return r;
+  });
+  queue = job.catch(() => {});
+  return job;
+}
+
+async function run(btn, fn) {
+  if (btn) btn.disabled = true;
+  try { return await fn(); } catch (e) { toast(e.message); } finally { if (btn) btn.disabled = false; }
+}
+
+async function refreshStatus(first) {
+  try {
+    const s = await send('STATUS');
+    $('battPct').textContent = s.battery;
+    const f = $('battFill'); f.style.width = s.battery + '%';
+    f.style.background = s.battery > 50 ? '#4caf50' : s.battery > 20 ? '#ff9800' : '#f44336';
+    $('footer').textContent = 'Firmware: ' + s.fw + ' | Sensor: ' + (s.sensor ? 'OK' : 'NOT FOUND') + ' | Calibrated: ' + (s.cal ? 'Yes' : 'No');
+    if (first) {
+      $('thr').value = s.thr; $('fml').value = [0, 2, 6].includes(s.fml) ? s.fml : 0;
+      if (s.std) loadStandard();
+    }
+  } catch (e) { /* ignore poll errors */ }
+}
+
+// ── Measurement ───────────────────────────────────────────────────
+function scanColor() {
+  run($('scanBtn'), async () => {
+    $('scanBtn').textContent = 'Scanning...';
+    try {
+      cur = await send('SCAN', 15000);
+      updateDisplay(); addToHistory(cur);
+    } finally { $('scanBtn').textContent = 'Scan Color'; }
+  });
+}
+
+function updateDisplay() {
+  if (!cur) return;
+  const sp = $('space').value, L = cur.L, a = cur.a, b = cur.b;
+  let l = ['L*', 'a*', 'b*'], v = [L, a, b];
+  if (sp === 'LCH') { l = ['L*', 'C*', 'h°']; v = [L, Math.hypot(a, b), (Math.atan2(b, a) * 180 / Math.PI + 360) % 360]; }
+  else if (sp === 'RGB') { l = ['R', 'G', 'B']; v = [cur.R, cur.G, cur.B]; }
+  else if (sp === 'CMYK') {
+    const r = cur.R / 255, g = cur.G / 255, bl = cur.B / 255, k = 1 - Math.max(r, g, bl);
+    l = ['C %', 'M %', 'Y %']; v = k >= 1 ? [0, 0, 0] : [(1 - r - k) / (1 - k) * 100, (1 - g - k) / (1 - k) * 100, (1 - bl - k) / (1 - k) * 100];
+  }
+  [1, 2, 3].forEach(i => { $('lbl' + i).textContent = l[i - 1]; $('v' + i).textContent = sp === 'RGB' ? Math.round(v[i - 1]) : (+v[i - 1]).toFixed(1); });
+  $('swatch').style.background = `rgb(${cur.R},${cur.G},${cur.B})`;
+}
+
+// ── Compare ───────────────────────────────────────────────────────
+function showStd(s) {
+  $('stdBox').style.display = 'block';
+  $('stdL').textContent = (+s.L).toFixed(2); $('stdA').textContent = (+s.a).toFixed(2); $('stdB').textContent = (+s.b).toFixed(2);
+}
+
+function setAsStandard() {
+  if (!cur) { toast('Scan a color first'); return; }
+  run(null, async () => {
+    await send(`SETSTD ${cur.L} ${cur.a} ${cur.b}`);
+    std = { L: cur.L, a: cur.a, b: cur.b }; showStd(std); toast('Standard set');
+  });
+}
+
+function loadStandard() {
+  run(null, async () => {
+    const r = await send('GETSTD');
+    if (!r.set) { toast('No standard on device'); return; }
+    std = r; showStd(r);
+  });
+}
+
+function compareNow() {
+  run($('cmpBtn'), async () => {
+    const r = await send('COMPARE');
+    $('deBox').style.display = 'block';
+    $('deVal').textContent = (+r.dE).toFixed(2);
+    $('deStat').className = r.pass ? 'pass' : 'fail';
+    $('deStat').textContent = r.pass ? 'PASS' : 'FAIL';
+  });
+}
+
+// ── History (stored on this phone) ────────────────────────────────
+function addToHistory(d) {
+  history.unshift({ t: new Date().toLocaleTimeString(), L: d.L.toFixed(1), a: d.a.toFixed(1), b: d.b.toFixed(1), rgb: `rgb(${d.R},${d.G},${d.B})` });
+  if (history.length > 50) history.pop();
+  try { localStorage.setItem('hist', JSON.stringify(history)); } catch (e) {}
+  renderHistory();
+}
+
+function renderHistory() {
+  $('histList').innerHTML = history.length
+    ? history.map(h => `<div class="hi"><div class="sw" style="background:${h.rgb}"></div><div><div class="t">${h.t}</div>L:${h.L} a:${h.a} b:${h.b}</div></div>`).join('')
+    : '<div style="text-align:center;color:#999;padding:20px;font-size:12px">No measurements yet</div>';
+}
+
+function clearHistory() {
+  if (!confirm('Clear all history?')) return;
+  history = []; try { localStorage.removeItem('hist'); } catch (e) {} renderHistory();
+  if (dev && dev.gatt.connected) run(null, () => send('CLEARHIST'));
+}
+
+// ── Settings ──────────────────────────────────────────────────────
+function saveSettings() {
+  const thr = Math.min(50, Math.max(0.1, parseFloat($('thr').value) || 2.0));
+  $('thr').value = thr;
+  run(null, async () => { await send(`SET ${thr} ${$('fml').value}`); toast('Settings saved'); });
+}
+
+function calibrate() {
+  if (!confirm('Put the bottom cap on the device, then press OK to calibrate.')) return;
+  run(null, async () => { toast('Calibrating...'); await send('CAL', 15000); toast('Calibration OK'); refreshStatus(false); });
+}
+
+function resetDevice() {
+  if (!confirm('Reset device data (standard, scans, history)?')) return;
+  run(null, async () => {
+    await send('RESET', 10000);
+    std = null; cur = null; $('stdBox').style.display = 'none'; $('deBox').style.display = 'none';
+    ['v1', 'v2', 'v3'].forEach(i => $(i).textContent = '--'); $('swatch').style.background = '#808080';
+    toast('Device reset');
+  });
+}
+
+function switchTab(name, btn) {
+  ['compare', 'history', 'settings'].forEach(t => $(t + 'Tab').style.display = t === name ? 'block' : 'none');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); btn.classList.add('active');
+}
+</script>
+</body>
+</html>
