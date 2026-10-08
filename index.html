@@ -49,6 +49,16 @@ button.b:disabled { opacity:.45; cursor:not-allowed; }
 .crow .info .lab { color:#667eea; font-weight:600; margin:2px 0; }
 .crow .info .pc { color:#999; font-size:11px; }
 .crow button.b { padding:10px 12px; font-size:11px; white-space:nowrap; }
+.crow.armed { border-color:#ff9800; background:#fff8ef; }
+.crow .ctl { display:flex; align-items:center; gap:8px; flex:none; }
+.crow .ctl .b { white-space:normal; width:88px; padding:10px 8px; }
+.tick { width:34px; height:34px; flex:none; border-radius:50%; border:2px solid #ddd; background:#fff; color:#ddd; font-size:15px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.tick.ready { border-color:#667eea; color:#667eea; }
+.tick.on { background:#4caf50; border-color:#4caf50; color:#fff; }
+.tick:disabled { cursor:not-allowed; }
+.wait { color:#ff9800; font-weight:600; }
+.lock { color:#4caf50; font-weight:700; }
+.none { color:#bbb; }
 .actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
 .actions .full { grid-column:1/-1; }
 
@@ -104,7 +114,7 @@ input[type=number], select { width:100%; padding:10px; border:1px solid #ddd; bo
       <div class="section-title"><span id="colCount">0</span> colors found</div>
       <div id="colorList"></div>
       <div class="actions">
-        <button class="b secondary" onclick="setAllStandards()">Set Standard (all)</button>
+        <button class="b secondary" onclick="lockAllScanned()">Lock all scanned</button>
         <button class="b primary" id="toCmpBtn" onclick="openCompare()" disabled>Color Compare</button>
         <button class="b danger full" onclick="newMaster()">New master image</button>
       </div>
@@ -142,10 +152,22 @@ const dec = new TextDecoder(), enc = new TextEncoder();
 
 // Master-image session state. Lives in memory only, so the standards stay
 // until the process is over (New master image) or the page is closed.
-let colors = [];          // [{id, L,a,b, rgb:[r,g,b], pct, std:bool}]
+//
+// A color's Lab is NEVER derived from the image. Image pixels are sRGB from a
+// camera or a screen, not a spectral measurement, so they don't agree with
+// what the colorimeter reads off the physical sample. The split only tells us
+// how many distinct colors there are, roughly what each looks like (rgb, for
+// the swatch) and how much of the image it covers. The authoritative Lab is
+// measured per color by scanning the real thing with the device.
+let colors = [];          // [{id, rgb:[r,g,b], pct, lab:{L,a,b}|null, locked:bool}]
 let segW = 0, segH = 0, segMap = null;   // per-pixel color index
 let selected = -1;
 let page = 'Home', sample = null;
+
+// Capture state: which row is waiting for a scan, and the device's standard as
+// it was when we started waiting. A change from that baseline is how we
+// recognise that the user pressed Scan Standard on the colorimeter.
+let armed = -1, armBaseline = null;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2500); }
 
@@ -154,12 +176,13 @@ function show(p) {
   page = p;
   ['Home', 'Colors', 'Compare'].forEach(n => $('page' + n).classList.toggle('show', n === p));
   $('backBtn').style.display = p === 'Home' ? 'none' : 'block';
-  $('hdrSub').textContent = { Home: 'Master image color standards', Colors: 'Set standards for each color', Compare: 'Color compare' }[p];
+  $('hdrSub').textContent = { Home: 'Master image color standards', Colors: 'Scan each color with the device', Compare: 'Color compare' }[p];
   window.scrollTo(0, 0);
 }
 function goBack() { show(page === 'Compare' ? 'Colors' : 'Home'); }
 function newMaster() {
-  if (colors.some(c => c.std) && !confirm('Standards will be cleared. Start over?')) return;
+  if (colors.some(c => c.lab) && !confirm('Scanned standards will be cleared. Start over?')) return;
+  armed = -1; armBaseline = null;
   colors = []; segMap = null; selected = -1; sample = null; $('file').value = '';
   $('results').innerHTML = '<div style="text-align:center;color:#999;font-size:12px;padding:16px">Scan a sample to compare with the standards</div>';
   $('smpSw').style.background = '#808080'; $('smpLab').innerHTML = 'L -- &nbsp; a -- &nbsp; b --';
@@ -295,11 +318,15 @@ function splitImage(img) {
   const remap = new Int16Array(cen.length); order.forEach((old, ni) => remap[old] = ni);
   segMap = new Int16Array(n); for (let i = 0; i < n; i++) segMap[i] = remap[assign[i]];
   segW = w; segH = h;
+  // Lab is used for the clustering above and then deliberately dropped — rgb
+  // is kept only to paint the swatch and the segmentation preview. Each row's
+  // standard Lab arrives later, from the device (see scanStandard).
   colors = order.map((old, ni) => ({
-    id: ni + 1, L: cen[old][0], a: cen[old][1], b: cen[old][2],
-    rgb: labToRgb(cen[old][0], cen[old][1], cen[old][2]), pct: cnt[old] / n * 100, std: false
+    id: ni + 1,
+    rgb: labToRgb(cen[old][0], cen[old][1], cen[old][2]),
+    pct: cnt[old] / n * 100, lab: null, locked: false
   }));
-  selected = -1;
+  selected = -1; armed = -1; armBaseline = null;
   $('cvMaster').width = w; $('cvMaster').height = h; $('cvMaster').getContext('2d').drawImage(cv, 0, 0);
   renderColors(); drawSeg(); show('Colors');
 }
@@ -315,30 +342,95 @@ function drawSeg() {
 }
 
 // ── Page 2: color list ────────────────────────────────────────────
+// Each row is a small state machine:
+//   idle      no Lab yet              Scan Standard arms the row
+//   armed     waiting for the device  user presses Scan Standard on the device
+//   measured  Lab captured            tick locks it, Scan Standard re-measures
+//   locked    Lab confirmed           counts as a standard on the Compare page
 function renderColors() {
   $('colCount').textContent = colors.length;
-  $('colorList').innerHTML = colors.map((c, i) =>
-    `<div class="crow${i === selected ? ' sel' : ''}" onclick="pick(${i})">
+  $('colorList').innerHTML = colors.map((c, i) => {
+    const busy = armed === i;
+    const lab  = busy    ? '<span class="wait">Press Scan Standard on the device...</span>'
+               : c.lab   ? `L ${c.lab.L.toFixed(2)} &nbsp; a ${c.lab.a.toFixed(2)} &nbsp; b ${c.lab.b.toFixed(2)}`
+                         : '<span class="none">Not scanned yet</span>';
+    const note = busy     ? ' &middot; <span class="wait">waiting</span>'
+               : c.locked ? ' &middot; <span class="lock">locked</span>'
+               : c.lab    ? ' &middot; <span style="color:#667eea">measured</span>' : '';
+    return `<div class="crow${i === selected ? ' sel' : ''}${busy ? ' armed' : ''}" onclick="pick(${i})">
        <div class="sw" style="background:rgb(${c.rgb})"></div>
        <div class="info"><div class="nm">Color ${c.id}</div>
-         <div class="lab">L ${c.L.toFixed(1)} &nbsp; a ${c.a.toFixed(1)} &nbsp; b ${c.b.toFixed(1)}</div>
-         <div class="pc">${c.pct.toFixed(1)}% of image${c.std ? ' &middot; <span class="pass">Standard set</span>' : ''}</div></div>
-       <button class="b ${c.std ? 'success' : 'secondary'}" onclick="event.stopPropagation();setStandard(${i})">${c.std ? 'Set &#10003;' : 'Set standard'}</button>
-     </div>`).join('');
-  $('toCmpBtn').disabled = !colors.some(c => c.std);
+         <div class="lab">${lab}</div>
+         <div class="pc">${c.pct.toFixed(1)}% of image${note}</div></div>
+       <div class="ctl">
+         <button class="b ${busy ? 'danger' : c.lab ? 'success' : 'secondary'}"
+           onclick="event.stopPropagation();scanStandard(${i})">${busy ? 'Cancel' : 'Scan Standard'}</button>
+         <button class="tick${c.locked ? ' on' : c.lab ? ' ready' : ''}" title="Lock this value"
+           onclick="event.stopPropagation();toggleLock(${i})"${c.lab ? '' : ' disabled'}>&#10003;</button>
+       </div>
+     </div>`;
+  }).join('');
+  $('toCmpBtn').disabled = !colors.some(c => c.locked);
 }
 function pick(i) { selected = selected === i ? -1 : i; renderColors(); drawSeg(); }
 
-function setStandard(i) {
-  colors[i].std = true; renderColors();
-  // mirror it to the device so its own screen shows the same standard
-  if (dev && dev.gatt.connected) run(null, () => send(`SETSTD ${colors[i].L.toFixed(2)} ${colors[i].a.toFixed(2)} ${colors[i].b.toFixed(2)}`));
-  toast(`Color ${colors[i].id} set as standard`);
+// Arm a row, then watch the device's own standard. doScanStandard() on the
+// colorimeter writes S.stdL/a/b, which is exactly what GETSTD reports — so a
+// change from the baseline taken at arm time means the user just scanned.
+// Nothing is pushed TO the device: the colorimeter owns the Lab value.
+async function scanStandard(i) {
+  if (armed === i) { disarm(); return; }                 // tapping again cancels
+  if (!dev || !dev.gatt.connected) { toast('Connect to the colorimeter first'); return; }
+  armed = i; armBaseline = null; renderColors();
+  try {
+    const s = await send('GETSTD');
+    if (armed !== i) return;                             // cancelled while waiting
+    armBaseline = s.set ? [s.L, s.a, s.b] : null;
+  } catch (e) { toast(e.message); disarm(); return; }
+  watchForScan(i);
 }
-function setAllStandards() { colors.forEach(c => c.std = true); renderColors(); toast('Standard set for all colors'); }
+
+// Self-rescheduling rather than setInterval: the device blocks for ~2s during
+// its scan animation (longer if a modal is open on its screen) and every
+// GETSTD shares one command queue, so a fixed interval would stack requests.
+async function watchForScan(i) {
+  while (armed === i) {
+    await new Promise(r => setTimeout(r, 700));
+    if (armed !== i) return;
+    let s;
+    try { s = await send('GETSTD', 20000); }
+    catch (e) {
+      if (!dev || !dev.gatt.connected) { toast('Device disconnected'); disarm(); return; }
+      continue;                                          // busy mid-scan — retry
+    }
+    if (armed !== i || !s.set) continue;
+    if (armBaseline && s.L === armBaseline[0] && s.a === armBaseline[1] && s.b === armBaseline[2]) continue;
+    colors[i].lab = { L: s.L, a: s.a, b: s.b };
+    colors[i].locked = false;                            // fresh reading needs confirming
+    armed = -1; armBaseline = null;
+    renderColors();
+    toast(`Color ${colors[i].id}: L ${s.L.toFixed(2)}  a ${s.a.toFixed(2)}  b ${s.b.toFixed(2)}`);
+    return;
+  }
+}
+
+function disarm() { armed = -1; armBaseline = null; renderColors(); }
+
+function toggleLock(i) {
+  if (!colors[i].lab) return;
+  colors[i].locked = !colors[i].locked;
+  renderColors();
+  toast(`Color ${colors[i].id} ${colors[i].locked ? 'locked' : 'unlocked'}`);
+}
+function lockAllScanned() {
+  const n = colors.filter(c => c.lab && !c.locked).length;
+  if (!n) { toast('Nothing scanned yet'); return; }
+  colors.forEach(c => { if (c.lab) c.locked = true; });
+  renderColors(); toast(`${n} color${n > 1 ? 's' : ''} locked`);
+}
 
 // ── Page 3: compare ───────────────────────────────────────────────
-function openCompare() { if (colors.some(c => c.std)) show('Compare'); }
+function openCompare() { if (colors.some(c => c.locked)) show('Compare'); }
 
 function scanAndCompare() {
   if (!dev || !dev.gatt.connected) { toast('Connect to the colorimeter first'); return; }
@@ -355,11 +447,19 @@ function renderResults() {
   if (!sample) return;
   const thr = Math.min(50, Math.max(0.1, parseFloat($('thr').value) || 2.0)); $('thr').value = thr;
   const m = $('fml').value, s = [sample.L, sample.a, sample.b];
-  const rows = colors.filter(c => c.std).map(c => ({ c, de: dE(m, null, [c.L, c.a, c.b], s) })).sort((x, y) => x.de - y.de);
+  // Only locked rows count — a measured-but-unconfirmed reading is still being
+  // checked by the user and shouldn't silently become a standard.
+  const rows = colors.filter(c => c.locked && c.lab)
+                     .map(c => ({ c, de: dE(m, null, [c.lab.L, c.lab.a, c.lab.b], s) }))
+                     .sort((x, y) => x.de - y.de);
+  if (!rows.length) {
+    $('results').innerHTML = '<div style="text-align:center;color:#999;font-size:12px;padding:16px">Lock at least one scanned color to compare against</div>';
+    return;
+  }
   $('results').innerHTML = rows.map((r, i) =>
     `<div class="res${i === 0 ? ' best' : ''}"><div class="sw" style="background:rgb(${r.c.rgb})"></div>
        <div class="g"><b>Color ${r.c.id}</b>${i === 0 ? '<span class="tag">closest</span>' : ''}<br>
-         <span style="color:#999">L ${r.c.L.toFixed(1)} a ${r.c.a.toFixed(1)} b ${r.c.b.toFixed(1)}</span></div>
+         <span style="color:#999">L ${r.c.lab.L.toFixed(1)} a ${r.c.lab.a.toFixed(1)} b ${r.c.lab.b.toFixed(1)}</span></div>
        <div style="text-align:right"><div class="de">${r.de.toFixed(2)}</div><div class="${r.de <= thr ? 'pass' : 'fail'}">${r.de <= thr ? 'PASS' : 'FAIL'}</div></div></div>`).join('');
 }
 $('thr').addEventListener('change', renderResults);
@@ -395,7 +495,7 @@ async function toggleConnect() {
     if (e.name !== 'NotFoundError') toast('Connect failed: ' + e.message);
   } finally { $('connBtn').disabled = false; }
 }
-function onDisconnected() { clearInterval(pollTimer); setConnected(false); toast('Device disconnected'); }
+function onDisconnected() { clearInterval(pollTimer); setConnected(false); if (armed >= 0) disarm(); toast('Device disconnected'); }
 function setConnected(on) {
   $('dot').classList.toggle('on', on);
   $('connText').textContent = on ? (dev.name || 'Connected') : 'Not connected';
@@ -431,7 +531,10 @@ async function run(btn, fn) {
   if (btn) btn.disabled = true;
   try { return await fn(); } catch (e) { toast(e.message); } finally { if (btn) btn.disabled = false; }
 }
+let statusBusy = false;
 async function refreshStatus() {
+  if (statusBusy) return;     // the scan watcher may be holding the queue
+  statusBusy = true;
   try {
     const s = await send('STATUS');
     $('battPct').textContent = s.battery;
@@ -439,6 +542,7 @@ async function refreshStatus() {
     f.style.background = s.battery > 50 ? '#4caf50' : s.battery > 20 ? '#ff9800' : '#f44336';
     $('footer').textContent = 'Firmware: ' + s.fw + ' | Sensor: ' + (s.sensor ? 'OK' : 'NOT FOUND') + ' | Calibrated: ' + (s.cal ? 'Yes' : 'No');
   } catch (e) { /* ignore poll errors */ }
+  finally { statusBusy = false; }
 }
 </script>
 </body>
